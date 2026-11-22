@@ -1,16 +1,9 @@
 {
-  "functions": {
-    "server.js": {
-      "includeFiles": "public/**"
-    },
-    "autolib-student-web/server.js": {
-      "includeFiles": "autolib-student-web/public/**"
-    },
-    "api/index.js": {
-      "includeFiles": "public/**"
-    }
-  },
   "rewrites": [
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
     {
       "source": "/api/(.*)",
       "destination": "/api"
