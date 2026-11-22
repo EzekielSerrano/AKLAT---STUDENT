@@ -446,7 +446,11 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`A.K.L.A.T. student portal listening on port ${PORT}`));
+if (require.main === module || !process.env.VERCEL) {
+  server.listen(PORT, () => console.log(`A.K.L.A.T. student portal listening on port ${PORT}`));
+}
+
+module.exports = server;
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
