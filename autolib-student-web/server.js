@@ -134,14 +134,19 @@ function securityHeaders(res) {
 }
 
 function clientIp(req) {
-  if (TRUST_PROXY) {
-    const xf = req.headers['x-forwarded-for'];
-    if (xf) return String(xf).split(',')[0].trim();
-  }
-  return req.socket.remoteAddress || 'unknown';
+  const xf = req.headers && (req.headers['x-forwarded-for'] || req.headers['x-real-ip']);
+  if (xf) return String(xf).split(',')[0].trim();
+  return (req.socket && req.socket.remoteAddress) || '127.0.0.1';
 }
 
 function readJson(req, limit = 10 * 1024) {
+  if (req.body) {
+    try {
+      return Promise.resolve(typeof req.body === 'string' ? JSON.parse(req.body) : req.body);
+    } catch {
+      return Promise.reject(Object.assign(new Error('Invalid request.'), { status: 400 }));
+    }
+  }
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
@@ -282,7 +287,11 @@ async function handleApi(req, res, url) {
     const origin = req.headers.origin;
     if (origin) {
       let ok = false;
-      try { ok = new URL(origin).host === req.headers.host; } catch { /* ignore */ }
+      try {
+        const originHost = new URL(origin).host;
+        const reqHost = req.headers['x-forwarded-host'] || req.headers.host;
+        ok = originHost === reqHost || originHost === req.headers.host;
+      } catch { /* ignore */ }
       if (!ok) return send(res, 403, { error: 'Request blocked.' });
     }
     if (!String(req.headers['content-type'] || '').startsWith('application/json'))
