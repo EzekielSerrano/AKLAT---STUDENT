@@ -540,6 +540,14 @@ async function appHandler(req, res) {
     const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
     const proto = req.headers['x-forwarded-proto'] || 'http';
     const url = new URL(req.url, `${proto}://${host}`);
+
+    // Recover original route if rewritten by hosting platform (Vercel)
+    const matchedPath = req.headers['x-matched-path'] || req.headers['x-forwarded-path'];
+    if (matchedPath && (matchedPath.startsWith('/api') || matchedPath.startsWith('/healthz'))) {
+      url.pathname = matchedPath.split('?')[0];
+    } else if (url.searchParams.has('path')) {
+      url.pathname = '/api/' + url.searchParams.get('path');
+    }
     if (url.pathname === '/healthz') {
       try {
         await pool.query('SELECT 1');

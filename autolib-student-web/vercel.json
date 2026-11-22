@@ -6,11 +6,11 @@
     },
     {
       "source": "/api/(.*)",
-      "destination": "/api"
+      "destination": "/api?path=$1"
     },
     {
       "source": "/healthz",
-      "destination": "/api"
+      "destination": "/api?path=../healthz"
     }
   ]
 }
