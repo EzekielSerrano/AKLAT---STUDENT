@@ -85,7 +85,27 @@ async function ensureTables() {
           days_overdue INT DEFAULT 0
         );
       `);
-      console.log('[db] Tables verified/created successfully.');
+
+      // Sync books catalog from librarian inventory
+      await pool.query(`
+        INSERT INTO books (barcode, title, author, call_number, section, isbn, total_copies, available_copies)
+        VALUES
+          ('BK-00211', 'Chemistry for Engineering Students', 'Zumdahl, S.', 'QD31.3 .Z86', 'Engineering', '9781305434776', 3, 0),
+          ('BK-00397', 'Engineering Mathematics', 'Bird, J.', 'TA330 .B57', 'Engineering', '9781138673595', 4, 0),
+          ('BK-00492', 'Data Structures and Algorithms', 'Cormen et al.', 'QA76.9.D35 C67', 'Science & Tech', '9780262033848', 5, 2),
+          ('BK-00501', 'Fundamentals of Physics', 'Halliday et al.', 'QC21.3 .H35', 'Science & Tech', '9781118230718', 6, 5),
+          ('BK-00652', 'Introduction to Psychology', 'Myers, D.', 'BF121 .M94', 'Humanities', '9781464108556', 2, 1),
+          ('BK-00798', 'Calculus: Early Transcendentals', 'Stewart, J.', 'QA303.2 .S74', 'Science & Tech', '9781285741550', 5, 3),
+          ('BK-00799', 'A Game Of Thrones', 'Daniel Abraham', 'PS3563.A78 G36', 'General Circulation', '9780553103540', 5, 3),
+          ('BK-00800', 'Harry Potter and the Sorcerer''s Stone', 'J. K. Rowling', 'PR6068.O93 H37', 'General Circulation', '9780590353403', 1, 1)
+        ON CONFLICT (barcode) DO UPDATE SET
+          title = EXCLUDED.title,
+          author = EXCLUDED.author,
+          section = EXCLUDED.section,
+          total_copies = EXCLUDED.total_copies,
+          available_copies = EXCLUDED.available_copies;
+      `);
+      console.log('[db] Tables and books synced successfully.');
     } catch (e) {
       console.error('[db] Table creation error:', e.message);
       tablesInitPromise = null;
