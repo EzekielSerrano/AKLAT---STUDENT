@@ -1,0 +1,5 @@
+# Replace with your real domain (its DNS A record must point to this server)
+library.example.com {
+    encode gzip
+    reverse_proxy web:3000
+}

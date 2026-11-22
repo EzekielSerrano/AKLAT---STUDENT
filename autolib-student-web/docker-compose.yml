@@ -1,0 +1,22 @@
+# App + automatic HTTPS (Caddy). The PostgreSQL database is NOT included —
+# it stays wherever your librarian app's database lives.
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "3000"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - web
+volumes:
+  caddy_data:

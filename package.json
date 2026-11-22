@@ -1,0 +1,10 @@
+{
+  "name": "autolib-student-web-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run --prefix autolib-student-web build",
+    "test": "npm run --prefix autolib-student-web test",
+    "start": "npm run --prefix autolib-student-web start"
+  }
+}

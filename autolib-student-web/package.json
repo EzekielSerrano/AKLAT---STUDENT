@@ -1,0 +1,24 @@
+{
+  "name": "autolib-student-web",
+  "version": "1.0.0",
+  "description": "A.K.L.A.T. student web portal (read-only view of books, loans and history)",
+  "main": "server.js",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node -c server.js",
+    "test": "node e2e_test.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@neon/config": "^1.14.6",
+    "@neon/env": "^2.1.9",
+    "@neon/realtime": "^0.2.1",
+    "@neondatabase/serverless": "^1.2.1",
+    "dotenv": "^18.0.10",
+    "pg": "^8.11.5",
+    "ws": "^8.23.0"
+  }
+}
