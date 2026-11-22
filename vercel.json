@@ -1,20 +1,12 @@
 {
-  "functions": {
-    "autolib-student-web/server.js": {
-      "includeFiles": "autolib-student-web/public/**"
-    },
-    "autolib-student-web/api/index.js": {
-      "includeFiles": "autolib-student-web/public/**"
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/autolib-student-web/api"
+      "destination": "/api"
     },
     {
       "source": "/healthz",
-      "destination": "/autolib-student-web/api"
+      "destination": "/api"
     }
   ]
 }

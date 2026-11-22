@@ -9,5 +9,14 @@
     "build": "npm run --prefix autolib-student-web build",
     "test": "npm run --prefix autolib-student-web test",
     "start": "npm run --prefix autolib-student-web start"
+  },
+  "dependencies": {
+    "@neon/config": "^1.14.6",
+    "@neon/env": "^2.1.9",
+    "@neon/realtime": "^0.2.1",
+    "@neondatabase/serverless": "^1.2.1",
+    "dotenv": "^18.0.10",
+    "pg": "^8.11.5",
+    "ws": "^8.23.0"
   }
 }
