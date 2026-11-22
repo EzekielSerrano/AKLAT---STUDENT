@@ -86,6 +86,9 @@ async function ensureTables() {
         );
       `);
 
+      // Remove temporary dummy books
+      await pool.query("DELETE FROM books WHERE barcode IN ('B-001', 'B-002');");
+
       // Sync books catalog from librarian inventory
       await pool.query(`
         INSERT INTO books (barcode, title, author, call_number, section, isbn, total_copies, available_copies)
@@ -483,6 +486,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && route === '/api/books') {
+    await ensureTables();
     const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
     const section = (url.searchParams.get('section') || '').trim().slice(0, 100);
     const availableOnly = url.searchParams.get('available') === '1';
