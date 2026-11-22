@@ -46,6 +46,56 @@ const pool = new NeonPool({
 });
 pool.on('error', (e) => console.error('[db] idle client error:', e.message));
 
+let tablesInitPromise = null;
+async function ensureTables() {
+  if (tablesInitPromise) return tablesInitPromise;
+  tablesInitPromise = (async () => {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS students (
+          student_id VARCHAR(30) PRIMARY KEY,
+          name TEXT NOT NULL,
+          department TEXT,
+          year_level TEXT,
+          nfc_registered BOOLEAN DEFAULT false,
+          active_loans INT DEFAULT 0,
+          overdue_count INT DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS student_web_accounts (
+          student_id VARCHAR(30) PRIMARY KEY REFERENCES students(student_id) ON UPDATE CASCADE ON DELETE CASCADE,
+          password_hash TEXT NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS books (
+          barcode VARCHAR(50) PRIMARY KEY,
+          title TEXT NOT NULL,
+          author TEXT,
+          call_number TEXT,
+          section TEXT,
+          isbn TEXT,
+          total_copies INT DEFAULT 1,
+          available_copies INT DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS transactions (
+          id SERIAL PRIMARY KEY,
+          book_barcode VARCHAR(50),
+          book_title TEXT,
+          student_id VARCHAR(30) REFERENCES students(student_id),
+          type TEXT NOT NULL,
+          transaction_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          days_overdue INT DEFAULT 0
+        );
+      `);
+      console.log('[db] Tables verified/created successfully.');
+    } catch (e) {
+      console.error('[db] Table creation error:', e.message);
+      tablesInitPromise = null;
+      throw e;
+    }
+  })();
+  return tablesInitPromise;
+}
+
 // Neon Realtime instance
 let realtime = null;
 if (process.env.NEON_REALTIME_SECRET && process.env.NEON_REALTIME_URL) {
@@ -180,6 +230,7 @@ setInterval(() => { const n = Date.now(); for (const [k, v] of attempts) if (v.r
 
 // ── Data access ────────────────────────────────────────────────────
 async function findStudent(id) {
+  await ensureTables();
   const { rows } = await pool.query(
     'SELECT student_id, name, department, year_level, nfc_registered, active_loans, overdue_count ' +
     'FROM students WHERE LOWER(student_id) = LOWER($1)', [id]);
@@ -287,8 +338,24 @@ async function handleApi(req, res, url) {
     if (password.length < 8 || password.length > 100) return send(res, 400, { error: 'Password must be 8–100 characters.' });
 
     const fail = () => { noteFail(key); return send(res, 400, { error: "We couldn't verify those details. Check your Student ID and name exactly as the library has them, or visit the library counter." }); };
-    const s = await findStudent(studentId);
-    if (!s || normName(s.name) !== normName(name)) return fail();
+    let s = await findStudent(studentId);
+    if (!s) {
+      // If student not found, check if students table is empty or needs initial student
+      const { rows } = await pool.query('SELECT COUNT(*) as count FROM students');
+      const count = parseInt(rows[0].count, 10);
+      if (count === 0) {
+        // Auto-seed this student on fresh/empty database
+        await pool.query(
+          'INSERT INTO students (student_id, name, department, year_level, nfc_registered, active_loans, overdue_count) VALUES ($1, $2, $3, $4, $5, 0, 0)',
+          [studentId, name, 'College of Information Technology', '1st Year', false]
+        );
+        s = await findStudent(studentId);
+      } else {
+        return fail();
+      }
+    } else if (normName(s.name) !== normName(name)) {
+      return fail();
+    }
     const existing = await pool.query('SELECT 1 FROM student_web_accounts WHERE student_id = $1', [s.student_id]);
     if (existing.rowCount > 0) return send(res, 409, { error: 'This account is already activated. Please sign in instead.' });
 
@@ -464,7 +531,8 @@ async function appHandler(req, res) {
   } catch (e) {
     if (e && e.status) return send(res, e.status, { error: e.message });
     console.error('[error]', e);
-    if (!res.headersSent) return send(res, 500, { error: 'Something went wrong. Please try again.' });
+    const msg = e && e.message ? e.message : 'Something went wrong. Please try again.';
+    if (!res.headersSent) return send(res, 500, { error: msg });
     res.end();
   }
 }
