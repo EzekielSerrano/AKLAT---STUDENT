@@ -396,21 +396,43 @@ const MIME = {
   '.svg': 'image/svg+xml',
 };
 
-function serveStatic(req, res, url) {
+async function serveStatic(req, res, url) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
   let rel = decodeURIComponent(url.pathname);
-  if (rel === '/') rel = '/index.html';
-  const file = path.normalize(path.join(PUBLIC_DIR, rel));
-  if (!file.startsWith(PUBLIC_DIR + path.sep)) return send(res, 403, 'Forbidden');
-  fs.readFile(file, (err, data) => {
-    if (err) return send(res, 404, 'Not found');
-    const ext = path.extname(file).toLowerCase();
+  if (rel === '/' || !rel) rel = '/index.html';
+
+  const candidates = [
+    path.join(__dirname, 'public', rel),
+    path.join(__dirname, rel),
+    path.join(process.cwd(), 'public', rel),
+    path.join(process.cwd(), rel)
+  ];
+
+  let targetFile = null;
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c) && fs.statSync(c).isFile()) {
+        targetFile = c;
+        break;
+      }
+    } catch (_) {}
+  }
+
+  if (!targetFile) {
+    return send(res, 404, 'Not found');
+  }
+
+  try {
+    const data = await fs.promises.readFile(targetFile);
+    const ext = path.extname(targetFile).toLowerCase();
     res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
     });
     res.end(req.method === 'HEAD' ? undefined : data);
-  });
+  } catch (err) {
+    return send(res, 404, 'Not found');
+  }
 }
 
 // ── Server Handler ──────────────────────────────────────────────────
@@ -435,7 +457,7 @@ async function appHandler(req, res) {
       }
     }
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
-    return serveStatic(req, res, url);
+    return await serveStatic(req, res, url);
   } catch (e) {
     if (e && e.status) return send(res, e.status, { error: e.message });
     console.error('[error]', e);
