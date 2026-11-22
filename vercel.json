@@ -1,15 +1,16 @@
 {
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "autolib-student-web/server.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
+      "source": "/api/(.*)",
+      "destination": "/autolib-student-web/api"
+    },
     {
-      "src": "/(.*)",
-      "dest": "autolib-student-web/server.js"
+      "source": "/healthz",
+      "destination": "/autolib-student-web/api"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/autolib-student-web/public/$1"
     }
   ]
 }

@@ -32,19 +32,15 @@ const SESSION_TTL_SEC = 2 * 60 * 60; // 2 hours
 const RULES = { maxLoans: 5, loanDays: 7, penaltyPerDay: 5 };
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-let SECRET = process.env.SESSION_SECRET;
-if (!SECRET) {
-  if (PROD) {
-    console.error('SESSION_SECRET is required when NODE_ENV=production.');
-    process.exit(1);
-  }
-  SECRET = crypto.randomBytes(32).toString('hex');
-  console.warn('[warn] SESSION_SECRET not set — using a temporary one (logins reset on restart).');
+let SECRET = process.env.SESSION_SECRET || 'dev_secret_for_aklat_student_portal_neon_setup_1234567890';
+if (!process.env.SESSION_SECRET) {
+  console.warn('[warn] SESSION_SECRET not set in environment — using default fallback secret.');
 }
 
 // Neon Postgres connection pool
+const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL || undefined;
 const pool = new NeonPool({
-  connectionString: process.env.DATABASE_URL || undefined,
+  connectionString: dbUrl,
   max: 10,
   connectionTimeoutMillis: 10000,
 });
@@ -417,11 +413,13 @@ function serveStatic(req, res, url) {
   });
 }
 
-// ── Server ─────────────────────────────────────────────────────────
-const server = http.createServer(async (req, res) => {
+// ── Server Handler ──────────────────────────────────────────────────
+async function appHandler(req, res) {
   try {
     securityHeaders(res);
-    const url = new URL(req.url, 'http://localhost');
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    const url = new URL(req.url, `${proto}://${host}`);
     if (url.pathname === '/healthz') {
       try {
         await pool.query('SELECT 1');
@@ -444,13 +442,17 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) return send(res, 500, { error: 'Something went wrong. Please try again.' });
     res.end();
   }
-});
+}
+
+const server = http.createServer(appHandler);
 
 if (require.main === module || !process.env.VERCEL) {
   server.listen(PORT, () => console.log(`A.K.L.A.T. student portal listening on port ${PORT}`));
 }
 
-module.exports = server;
+// Export appHandler for Vercel Serverless Function & server for Node
+module.exports = appHandler;
+module.exports.server = server;
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
