@@ -19,8 +19,7 @@ const { Pool: NeonPool, neonConfig } = require('@neondatabase/serverless');
 const ws = require('ws');
 neonConfig.webSocketConstructor = ws;
 
-// Neon Realtime service
-const { createRealtime, rawSql } = require('@neon/realtime/server');
+// Neon Realtime service (dynamically imported below to avoid ERR_REQUIRE_ESM)
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -96,19 +95,35 @@ async function ensureTables() {
   return tablesInitPromise;
 }
 
-// Neon Realtime instance
+// Neon Realtime instance (lazy dynamic import to prevent ERR_REQUIRE_ESM in Vercel)
 let realtime = null;
-if (process.env.NEON_REALTIME_SECRET && process.env.NEON_REALTIME_URL) {
-  try {
-    realtime = createRealtime({
-      url: process.env.NEON_REALTIME_URL,
-      secret: process.env.NEON_REALTIME_SECRET,
-      db: 'neondb',
-    });
-    console.log('[neon] Realtime service initialized with endpoint:', process.env.NEON_REALTIME_URL);
-  } catch (err) {
-    console.error('[neon] Failed to initialize Realtime service:', err.message);
+let rawSql = null;
+let realtimeInitPromise = null;
+
+async function getRealtime() {
+  if (realtimeInitPromise) return realtimeInitPromise;
+  if (!process.env.NEON_REALTIME_SECRET || !process.env.NEON_REALTIME_URL) {
+    return null;
   }
+  realtimeInitPromise = (async () => {
+    try {
+      const mod = await import('@neon/realtime/server');
+      rawSql = mod.rawSql;
+      const createRealtime = mod.createRealtime;
+      realtime = createRealtime({
+        url: process.env.NEON_REALTIME_URL,
+        secret: process.env.NEON_REALTIME_SECRET,
+        db: 'neondb',
+      });
+      console.log('[neon] Realtime service initialized with endpoint:', process.env.NEON_REALTIME_URL);
+      return realtime;
+    } catch (err) {
+      console.error('[neon] Failed to initialize Realtime service:', err.message);
+      realtime = null;
+      return null;
+    }
+  })();
+  return realtimeInitPromise;
 }
 
 // ── Small helpers ──────────────────────────────────────────────────
@@ -300,6 +315,7 @@ async function handleApi(req, res, url) {
 
   // ── Public routes ──
   if (method === 'GET' && route === '/api/neon/status') {
+    await getRealtime();
     return send(res, 200, {
       postgres: {
         configured: !!process.env.DATABASE_URL,
@@ -314,6 +330,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && route === '/api/realtime/health') {
+    await getRealtime();
     if (!realtime) return send(res, 503, { ok: false, error: 'Neon Realtime service not configured.' });
     try {
       const liveCheck = rawSql('SELECT 1 as live_check');
@@ -325,6 +342,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && route === '/api/realtime/books') {
+    await getRealtime();
     if (!realtime) return send(res, 503, { error: 'Neon Realtime service not configured.' });
     try {
       const booksQuery = rawSql('SELECT barcode, title, author, section, call_number, total_copies, available_copies FROM books ORDER BY title LIMIT 60');
@@ -412,6 +430,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && route === '/api/realtime/loans') {
+    await getRealtime();
     if (!realtime) return send(res, 503, { error: 'Neon Realtime service not configured.' });
     try {
       const loansQuery = rawSql(
