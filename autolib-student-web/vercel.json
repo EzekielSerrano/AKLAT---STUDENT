@@ -1,4 +1,12 @@
 {
+  "functions": {
+    "server.js": {
+      "includeFiles": "public/**"
+    },
+    "api/index.js": {
+      "includeFiles": "public/**"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",

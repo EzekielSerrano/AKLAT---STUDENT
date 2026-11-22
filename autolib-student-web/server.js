@@ -400,12 +400,15 @@ async function serveStatic(req, res, url) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
   let rel = decodeURIComponent(url.pathname);
   if (rel === '/' || !rel) rel = '/index.html';
+  const cleanRel = rel.replace(/^\/+/, '');
 
   const candidates = [
-    path.join(__dirname, 'public', rel),
-    path.join(__dirname, rel),
-    path.join(process.cwd(), 'public', rel),
-    path.join(process.cwd(), rel)
+    path.join(__dirname, 'public', cleanRel),
+    path.join(__dirname, cleanRel),
+    path.join(process.cwd(), 'public', cleanRel),
+    path.join(process.cwd(), cleanRel),
+    path.join(__dirname, '..', 'public', cleanRel),
+    path.join(process.cwd(), 'autolib-student-web', 'public', cleanRel)
   ];
 
   let targetFile = null;
