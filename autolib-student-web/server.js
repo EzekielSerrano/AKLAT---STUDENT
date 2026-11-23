@@ -547,7 +547,7 @@ async function handleApi(req, res, url) {
         emailSent = true;
       } catch (err) {
         console.error('[Resend Error]', err);
-        return send(res, 500, { error: 'Failed to send email. Please check RESEND_API_KEY or contact library staff.' });
+        return send(res, 500, { error: err.message || 'Failed to send email.' });
       }
     } else {
       console.log(`[TEST/DEV OTP] Student ${s.student_id} (${studentEmail}): OTP = ${otp}`);
