@@ -137,16 +137,22 @@
         return b;
       }));
 
+    const userInitials = initials(me.name);
+
     const side = h('aside', { class: 'side' },
-      h('div', { class: 'brand' }, h('img', { src: '/logo.png', alt: '' }),
+      h('div', { class: 'brand' },
+        h('img', { src: '/logo.png', alt: '' }),
         h('div', null, h('b', null, 'A.K.L.A.T.'), h('span', null, 'STUDENT PORTAL'))),
       nav,
+      h('div', { class: 'status-indicator' },
+        h('span', { class: 'dot-green' }),
+        'Neon Postgres Active'),
       h('div', { class: 'who' },
-        h('div', { class: 'meta' }, h('div', { class: 'nm' }, me.name), h('div', { class: 'id' }, me.studentId)),
-        h('button', { type: 'button', onclick: logout }, 'Sign out')),
-      h('div', { style: 'padding: 8px 14px; font-size: 11px; color: #15803d; display: flex; align-items: center; gap: 6px; border-top: 1px solid rgba(0,0,0,0.06);' },
-        h('span', { style: 'width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block;' }),
-        'Neon Postgres & Realtime Active'));
+        h('div', { class: 'who-avatar' }, userInitials),
+        h('div', { class: 'meta' },
+          h('div', { class: 'nm' }, me.name),
+          h('div', { class: 'wid' }, me.studentId)),
+        h('button', { type: 'button', class: 'btn-signout', onclick: logout }, 'Sign out')));
 
     titleEl = h('div', { class: 'top' }, '');
     mainEl = h('div', { class: 'content' });
