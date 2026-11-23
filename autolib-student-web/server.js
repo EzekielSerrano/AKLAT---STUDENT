@@ -274,10 +274,13 @@ function maskEmail(email) {
   return `${visible}****@${domain}`;
 }
 
+// ── Email Integration (Gmail SMTP / Resend) ────────────────────────
+let nodemailer = null;
+try { nodemailer = require('nodemailer'); } catch (_) {}
+
 async function sendEmailViaResend({ to, subject, html }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    console.warn('[Resend] RESEND_API_KEY not configured.');
     return { ok: false, error: 'RESEND_API_KEY_MISSING' };
   }
   const from = process.env.RESEND_FROM || 'AKLAT Library <onboarding@resend.dev>';
@@ -299,7 +302,40 @@ async function sendEmailViaResend({ to, subject, html }) {
     console.error('[Resend Error]', data);
     throw new Error(data.message || 'Failed to send verification email via Resend.');
   }
-  return { ok: true, data };
+  return { ok: true, provider: 'resend', data };
+}
+
+async function sendEmail({ to, subject, html }) {
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_PASS;
+
+  // 1. Prefer Gmail SMTP if credentials provided (works with all @g.batstate-u.edu.ph)
+  if (smtpUser && smtpPass) {
+    if (!nodemailer) nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: smtpUser.trim(),
+        pass: smtpPass.replace(/\s+/g, '').trim(),
+      },
+    });
+
+    const info = await transporter.sendMail({
+      from: `"A.K.L.A.T. Library" <${smtpUser.trim()}>`,
+      to,
+      subject,
+      html,
+    });
+    return { ok: true, provider: 'gmail', messageId: info.messageId };
+  }
+
+  // 2. Fall back to Resend if RESEND_API_KEY provided
+  if (process.env.RESEND_API_KEY) {
+    return await sendEmailViaResend({ to, subject, html });
+  }
+
+  // 3. Neither configured
+  return { ok: false, error: 'NO_EMAIL_CONFIG' };
 }
 
 // ── Login rate limiting (in memory) ────────────────────────────────
@@ -536,27 +572,25 @@ async function handleApi(req, res, url) {
       </div>
     `;
 
-    let emailSent = false;
-    if (process.env.RESEND_API_KEY) {
-      try {
-        await sendEmailViaResend({
-          to: studentEmail,
-          subject: `${otp} is your A.K.L.A.T. password reset code`,
-          html: emailHtml,
-        });
-        emailSent = true;
-      } catch (err) {
-        console.error('[Resend Error]', err);
-        return send(res, 500, { error: err.message || 'Failed to send email.' });
-      }
-    } else {
+    const emailResult = await sendEmail({
+      to: studentEmail,
+      subject: `${otp} is your A.K.L.A.T. password reset code`,
+      html: emailHtml,
+    }).catch((err) => ({ ok: false, error: err.message || 'Failed to dispatch email.' }));
+
+    if (!emailResult.ok && emailResult.error !== 'NO_EMAIL_CONFIG') {
+      console.error('[Email Dispatch Error]', emailResult);
+      return send(res, 500, { error: emailResult.error || 'Failed to send verification email. Please check email/SMTP settings.' });
+    }
+
+    if (emailResult.error === 'NO_EMAIL_CONFIG') {
       console.log(`[TEST/DEV OTP] Student ${s.student_id} (${studentEmail}): OTP = ${otp}`);
     }
 
     return send(res, 200, {
       ok: true,
       email: maskEmail(studentEmail),
-      resendConfigured: !!process.env.RESEND_API_KEY,
+      provider: emailResult.provider || 'test',
     });
   }
 
