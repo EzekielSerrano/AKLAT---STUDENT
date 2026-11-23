@@ -438,6 +438,33 @@ async function handleApi(req, res, url) {
     return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader('', 0) });
   }
 
+  // ── Forgot / reset password (verify by Student ID + full name, same as activation) ──
+  if (method === 'POST' && route === '/api/reset-password') {
+    const body = await readJson(req);
+    const studentId = String(body.studentId || '').trim();
+    const name = String(body.name || '');
+    const password = String(body.password || '');
+    const ip = clientIp(req);
+    const key = 'rst|' + ip;
+    if (tooMany(key, 10)) return send(res, 429, { error: 'Too many attempts. Please try again in 15 minutes.' });
+    if (!studentId || !name.trim()) return send(res, 400, { error: 'Please enter your Student ID and full name.' });
+    if (password.length < 8 || password.length > 100) return send(res, 400, { error: 'Password must be 8–100 characters.' });
+
+    const fail = () => { noteFail(key); return send(res, 400, { error: "We couldn't verify those details. Check your Student ID and name exactly as the library has them, or visit the library counter." }); };
+    const s = await findStudent(studentId);
+    if (!s) return fail();
+    if (normName(s.name) !== normName(name)) return fail();
+
+    // Student must already have an activated account to reset
+    const existing = await pool.query('SELECT 1 FROM student_web_accounts WHERE student_id = $1', [s.student_id]);
+    if (existing.rowCount === 0) return send(res, 400, { error: 'No activated account found. Please use "First time? Activate" instead.' });
+
+    const hash = await hashPassword(password);
+    await pool.query('UPDATE student_web_accounts SET password_hash = $1 WHERE student_id = $2', [hash, s.student_id]);
+    clearFails(key);
+    return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(makeToken(s.student_id), SESSION_TTL_SEC) });
+  }
+
   // ── Authenticated routes ──
   const sid = readSession(req);
   if (!sid) return send(res, 401, { error: 'Please sign in.' });
