@@ -81,67 +81,110 @@
     profile: ['My Profile', renderProfile],
   };
 
-  // -- Auth screen (login / activate / forgot password) --
-  function showAuth(mode = 'login', notice = '') {
+  // -- Auth screen (login / activate / forgot password with Resend OTP) --
+  function showAuth(mode = 'login', notice = '', forgotState = { step: 1, sid: '', email: '' }) {
     const msg = h('div', { class: 'msg err hidden', role: 'alert' });
     const okMsg = notice ? h('div', { class: 'msg ok' }, notice) : null;
 
-    const id = h('input', { id: 'sid', type: 'text', autocomplete: 'username', placeholder: 'e.g. 25-10834', required: true });
+    const id = h('input', { id: 'sid', type: 'text', autocomplete: 'username', placeholder: 'e.g. 25-10834', required: true, value: forgotState.sid || '' });
     const pw = h('input', { id: 'pw', type: 'password',
       autocomplete: mode === 'login' ? 'current-password' : 'new-password',
       required: true, minlength: mode === 'login' ? null : '8' });
     const name = h('input', { id: 'nm', type: 'text', autocomplete: 'name', placeholder: 'Last name, First name M.' });
+    const otp = h('input', { id: 'otp', type: 'text', class: 'otp-input', maxlength: '6', placeholder: '000000', autocomplete: 'one-time-code', required: true });
 
-    const btnLabel = mode === 'login' ? 'Sign in'
-      : mode === 'forgot' ? 'Reset my password'
-      : 'Activate my account';
-    const btn = h('button', { class: 'btn block', type: 'submit' }, btnLabel);
+    let formKids = [];
 
-    const needsName = mode === 'activate' || mode === 'forgot';
-    const pwLabel = mode === 'login' ? 'Password'
-      : mode === 'forgot' ? 'New password (8+ characters)'
-      : 'Create a password (8+ characters)';
+    if (mode === 'login') {
+      const btn = h('button', { class: 'btn block', type: 'submit' }, 'Sign in');
+      formKids = [
+        okMsg, msg,
+        h('label', { class: 'field' }, h('span', null, 'Student ID / SR-Code'), id),
+        h('label', { class: 'field' }, h('span', null, 'Password'), pw),
+        h('p', { class: 'hint', style: 'margin-top:4px;text-align:right;' },
+          h('a', { href: '#', style: 'color:var(--red);font-weight:700;text-decoration:none;',
+            onclick: (e) => { e.preventDefault(); showAuth('forgot'); } }, 'Forgot password?')),
+        btn
+      ];
+    } else if (mode === 'activate') {
+      const btn = h('button', { class: 'btn block', type: 'submit' }, 'Activate my account');
+      formKids = [
+        okMsg, msg,
+        h('label', { class: 'field' }, h('span', null, 'Student ID / SR-Code'), id),
+        h('label', { class: 'field' }, h('span', null, 'Full name (as registered at the library)'), name),
+        h('label', { class: 'field' }, h('span', null, 'Create a password (8+ characters)'), pw),
+        h('p', { class: 'hint' }, 'First time here? Your name must match the library record. You only need to do this once.'),
+        btn
+      ];
+    } else if (mode === 'forgot') {
+      if (forgotState.step === 1) {
+        const btn = h('button', { class: 'btn block', type: 'submit' }, 'Send verification code');
+        formKids = [
+          okMsg, msg,
+          h('label', { class: 'field' }, h('span', null, 'Student ID / SR-Code'), id),
+          h('p', { class: 'hint' }, 'A 6-digit verification code will be sent to your institutional GSuite email (sr-code@g.batstate-u.edu.ph).'),
+          btn
+        ];
+      } else {
+        const btn = h('button', { class: 'btn block', type: 'submit' }, 'Reset password & Sign in');
+        formKids = [
+          okMsg, msg,
+          h('div', { class: 'msg ok', style: 'margin-bottom:14px;' },
+            'Verification code sent to ', h('b', null, forgotState.email),
+            h('div', { style: 'margin-top:6px;font-size:12px;' },
+              h('a', { href: '#', style: 'color:var(--green);font-weight:700;', onclick: (e) => { e.preventDefault(); showAuth('forgot', '', { step: 1, sid: id.value }); } }, 'Change Student ID'))),
+          h('label', { class: 'field' }, h('span', null, '6-Digit Verification Code'), otp),
+          h('label', { class: 'field' }, h('span', null, 'New Password (8+ characters)'), pw),
+          h('p', { class: 'hint' }, 'Please check your inbox or spam folder for the code. It expires in 10 minutes.'),
+          btn,
+          h('p', { class: 'hint', style: 'margin-top:12px;text-align:center;' },
+            h('a', { href: '#', style: 'color:var(--red);font-weight:600;text-decoration:none;',
+              onclick: async (e) => {
+                e.preventDefault();
+                try {
+                  const r = await api('/forgot-password/request', { studentId: forgotState.sid });
+                  showAuth('forgot', 'A new verification code has been sent to ' + r.email, { step: 2, sid: forgotState.sid, email: r.email });
+                } catch (err) {
+                  msg.textContent = err.message;
+                  msg.classList.remove('hidden');
+                }
+              } }, 'Didn’t receive code? Resend'))
+        ];
+      }
+    }
 
-    const form = h('form', { novalidate: true },
-      okMsg, msg,
-      h('label', { class: 'field' }, h('span', null, 'Student ID'), id),
-      needsName ? h('label', { class: 'field' }, h('span', null, 'Full name (as registered at the library)'), name) : null,
-      h('label', { class: 'field' }, h('span', null, pwLabel), pw),
-      mode === 'activate'
-        ? h('p', { class: 'hint' }, 'First time here? Your name must match the library record. You only need to do this once.')
-        : null,
-      mode === 'forgot'
-        ? h('p', { class: 'hint' }, 'Enter your Student ID and full name exactly as the library has them, then set a new password.')
-        : null,
-      mode === 'login'
-        ? h('p', { class: 'hint', style: 'margin-top:4px;text-align:right;' },
-            h('a', { href: '#', style: 'color:var(--red);font-weight:700;text-decoration:none;',
-              onclick: (e) => { e.preventDefault(); showAuth('forgot'); } }, 'Forgot password?'))
-        : null,
-      btn);
+    const form = h('form', { novalidate: true }, ...formKids);
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       msg.classList.add('hidden');
-      if (!id.value.trim() || !pw.value || (needsName && !name.value.trim())) {
-        msg.textContent = 'Please fill in all fields.';
-        msg.classList.remove('hidden');
-        return;
-      }
-      btn.disabled = true;
+      const submitBtn = form.querySelector('button[type=submit]');
+      if (submitBtn) submitBtn.disabled = true;
+
       try {
         if (mode === 'login') {
+          if (!id.value.trim() || !pw.value) throw new Error('Please fill in all fields.');
           await api('/login', { studentId: id.value.trim(), password: pw.value });
+          await boot();
         } else if (mode === 'activate') {
+          if (!id.value.trim() || !name.value.trim() || !pw.value) throw new Error('Please fill in all fields.');
           await api('/activate', { studentId: id.value.trim(), name: name.value, password: pw.value });
+          await boot();
         } else if (mode === 'forgot') {
-          await api('/reset-password', { studentId: id.value.trim(), name: name.value, password: pw.value });
+          if (forgotState.step === 1) {
+            if (!id.value.trim()) throw new Error('Please enter your Student ID.');
+            const r = await api('/forgot-password/request', { studentId: id.value.trim() });
+            showAuth('forgot', '', { step: 2, sid: id.value.trim(), email: r.email });
+          } else {
+            if (!otp.value.trim() || !pw.value) throw new Error('Please enter the 6-digit code and your new password.');
+            await api('/forgot-password/verify', { studentId: forgotState.sid, otp: otp.value.trim(), password: pw.value });
+            await boot();
+          }
         }
-        await boot();
       } catch (err) {
         msg.textContent = err.message;
         msg.classList.remove('hidden');
-        btn.disabled = false;
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
 
@@ -157,7 +200,12 @@
           tab('activate', 'First time? Activate'),
           tab('forgot', 'Forgot password?')),
         form)));
-    id.focus();
+
+    if (mode === 'forgot' && forgotState.step === 2) {
+      otp.focus();
+    } else {
+      id.focus();
+    }
   }
 
   // -- Shell --

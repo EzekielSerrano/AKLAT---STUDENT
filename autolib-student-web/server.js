@@ -84,6 +84,14 @@ async function ensureTables() {
           transaction_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           days_overdue INT DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS password_reset_otps (
+          id SERIAL PRIMARY KEY,
+          student_id VARCHAR(30) NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
+          otp_hash TEXT NOT NULL,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+          used BOOLEAN DEFAULT false,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
       `);
 
       // Remove temporary dummy books
@@ -252,6 +260,47 @@ async function verifyPassword(pw, stored) {
 }
 
 const DUMMY_HASH = 'scrypt$' + '00'.repeat(16) + '$' + '00'.repeat(64);
+
+// ── Resend Email Integration ──────────────────────────────────────
+function studentToEmail(studentId) {
+  const cleanId = String(studentId || '').trim();
+  return `${cleanId}@g.batstate-u.edu.ph`;
+}
+
+function maskEmail(email) {
+  const [user, domain] = email.split('@');
+  if (!user || !domain) return email;
+  const visible = user.slice(0, Math.min(3, user.length));
+  return `${visible}****@${domain}`;
+}
+
+async function sendEmailViaResend({ to, subject, html }) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn('[Resend] RESEND_API_KEY not configured.');
+    return { ok: false, error: 'RESEND_API_KEY_MISSING' };
+  }
+  const from = process.env.RESEND_FROM || 'AKLAT Library <onboarding@resend.dev>';
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      html,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    console.error('[Resend Error]', data);
+    throw new Error(data.message || 'Failed to send verification email via Resend.');
+  }
+  return { ok: true, data };
+}
 
 // ── Login rate limiting (in memory) ────────────────────────────────
 const attempts = new Map();
@@ -438,31 +487,124 @@ async function handleApi(req, res, url) {
     return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader('', 0) });
   }
 
-  // ── Forgot / reset password (verify by Student ID + full name, same as activation) ──
-  if (method === 'POST' && route === '/api/reset-password') {
+  // ── Forgot Password: Step 1 — Send 6-Digit Code to GSuite Email via Resend ──
+  if (method === 'POST' && route === '/api/forgot-password/request') {
+    await ensureTables();
     const body = await readJson(req);
     const studentId = String(body.studentId || '').trim();
-    const name = String(body.name || '');
+    const ip = clientIp(req);
+    const key = 'fp_req|' + ip;
+    if (tooMany(key, 8)) return send(res, 429, { error: 'Too many requests. Please try again in 15 minutes.' });
+    if (!studentId) return send(res, 400, { error: 'Please enter your Student ID / SR-Code.' });
+
+    const s = await findStudent(studentId);
+    if (!s) return send(res, 400, { error: 'Student ID not found in library records.' });
+
+    const existing = await pool.query('SELECT 1 FROM student_web_accounts WHERE student_id = $1', [s.student_id]);
+    if (existing.rowCount === 0) {
+      return send(res, 400, { error: 'This account has not been activated yet. Please click "First time? Activate" first.' });
+    }
+
+    // Generate 6-digit OTP
+    const otp = String(crypto.randomInt(100000, 1000000));
+    const otpHash = crypto.createHash('sha256').update(otp + SECRET).digest('hex');
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
+
+    // Invalidate any active previous OTPs for this student
+    await pool.query('UPDATE password_reset_otps SET used = true WHERE student_id = $1 AND used = false', [s.student_id]);
+    await pool.query(
+      'INSERT INTO password_reset_otps (student_id, otp_hash, expires_at) VALUES ($1, $2, $3)',
+      [s.student_id, otpHash, expiresAt]
+    );
+
+    const studentEmail = studentToEmail(s.student_id);
+    const emailHtml = `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 14px; border: 1px solid #E8EDF5;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="color: #12163A; margin: 0 0 4px; font-size: 22px;">A.K.L.A.T. Library</h2>
+          <p style="color: #7E8EB0; font-size: 13px; margin: 0;">Batangas State University · The National Engineering University</p>
+        </div>
+        <p style="color: #141926; font-size: 14px; margin: 0 0 14px;">Hello <b>${s.name}</b>,</p>
+        <p style="color: #5A6480; font-size: 13.5px; line-height: 1.5; margin: 0 0 20px;">We received a request to reset your A.K.L.A.T. Student Portal password. Use the verification code below to complete the reset:</p>
+        <div style="background: #F8FAFD; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0; border: 1.5px solid #DCE2F0;">
+          <div style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #CC2936; font-family: Consolas, monospace;">${otp}</div>
+          <p style="color: #7E8EB0; font-size: 12px; margin: 10px 0 0; font-weight: 600;">Valid for 10 minutes</p>
+        </div>
+        <p style="color: #7E8EB0; font-size: 12.5px; line-height: 1.5; margin: 20px 0 0;">If you did not request a password reset, you can safely ignore this email — your account remains secure.</p>
+        <hr style="border: 0; border-top: 1px solid #E8EDF5; margin: 24px 0 16px;" />
+        <p style="color: #A0ACBF; font-size: 11px; text-align: center; margin: 0;">Automated Key Library Analytics & Tracking · BatStateU</p>
+      </div>
+    `;
+
+    let emailSent = false;
+    if (process.env.RESEND_API_KEY) {
+      try {
+        await sendEmailViaResend({
+          to: studentEmail,
+          subject: `${otp} is your A.K.L.A.T. password reset code`,
+          html: emailHtml,
+        });
+        emailSent = true;
+      } catch (err) {
+        console.error('[Resend Error]', err);
+        return send(res, 500, { error: 'Failed to send email. Please check RESEND_API_KEY or contact library staff.' });
+      }
+    } else {
+      console.log(`[TEST/DEV OTP] Student ${s.student_id} (${studentEmail}): OTP = ${otp}`);
+    }
+
+    return send(res, 200, {
+      ok: true,
+      email: maskEmail(studentEmail),
+      resendConfigured: !!process.env.RESEND_API_KEY,
+    });
+  }
+
+  // ── Forgot Password: Step 2 — Verify Code & Set New Password ──
+  if (method === 'POST' && (route === '/api/forgot-password/verify' || route === '/api/reset-password')) {
+    await ensureTables();
+    const body = await readJson(req);
+    const studentId = String(body.studentId || '').trim();
+    const otp = String(body.otp || '').trim();
     const password = String(body.password || '');
     const ip = clientIp(req);
-    const key = 'rst|' + ip;
-    if (tooMany(key, 10)) return send(res, 429, { error: 'Too many attempts. Please try again in 15 minutes.' });
-    if (!studentId || !name.trim()) return send(res, 400, { error: 'Please enter your Student ID and full name.' });
+    const key = 'fp_ver|' + ip;
+
+    if (tooMany(key, 12)) return send(res, 429, { error: 'Too many attempts. Please try again in 15 minutes.' });
+    if (!studentId || !password) return send(res, 400, { error: 'Please enter your Student ID and new password.' });
     if (password.length < 8 || password.length > 100) return send(res, 400, { error: 'Password must be 8–100 characters.' });
 
-    const fail = () => { noteFail(key); return send(res, 400, { error: "We couldn't verify those details. Check your Student ID and name exactly as the library has them, or visit the library counter." }); };
-    const s = await findStudent(studentId);
-    if (!s) return fail();
-    if (normName(s.name) !== normName(name)) return fail();
+    // If OTP is provided, verify against password_reset_otps
+    if (otp) {
+      const { rows } = await pool.query(
+        'SELECT id, otp_hash FROM password_reset_otps WHERE LOWER(student_id) = LOWER($1) AND used = false AND expires_at > NOW() ORDER BY id DESC LIMIT 1',
+        [studentId]
+      );
+      if (!rows.length) {
+        return send(res, 400, { error: 'Verification code has expired or is invalid. Please request a new code.' });
+      }
 
-    // Student must already have an activated account to reset
-    const existing = await pool.query('SELECT 1 FROM student_web_accounts WHERE student_id = $1', [s.student_id]);
-    if (existing.rowCount === 0) return send(res, 400, { error: 'No activated account found. Please use "First time? Activate" instead.' });
+      const expectedHash = crypto.createHash('sha256').update(otp + SECRET).digest('hex');
+      if (rows[0].otp_hash !== expectedHash) {
+        noteFail(key);
+        return send(res, 400, { error: 'Incorrect 6-digit code. Please check your institutional email and try again.' });
+      }
+
+      await pool.query('UPDATE password_reset_otps SET used = true WHERE id = $1', [rows[0].id]);
+    } else if (body.name) {
+      // Fallback: name verification
+      const s = await findStudent(studentId);
+      if (!s || normName(s.name) !== normName(body.name)) {
+        return send(res, 400, { error: "We couldn't verify those details." });
+      }
+    } else {
+      return send(res, 400, { error: 'Please enter the 6-digit verification code sent to your email.' });
+    }
 
     const hash = await hashPassword(password);
-    await pool.query('UPDATE student_web_accounts SET password_hash = $1 WHERE student_id = $2', [hash, s.student_id]);
+    await pool.query('UPDATE student_web_accounts SET password_hash = $1 WHERE LOWER(student_id) = LOWER($2)', [hash, studentId]);
     clearFails(key);
-    return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(makeToken(s.student_id), SESSION_TTL_SEC) });
+    return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(makeToken(studentId), SESSION_TTL_SEC) });
   }
 
   // ── Authenticated routes ──
