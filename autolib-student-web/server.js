@@ -306,8 +306,8 @@ async function sendEmailViaResend({ to, subject, html }) {
 }
 
 async function sendEmail({ to, subject, html }) {
-  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
-  const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_PASS;
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || 'serranoezekielaron24@gmail.com';
+  const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_PASS || 'ctiazqwrqwwabmnk';
 
   // 1. Prefer Gmail SMTP if credentials provided (works with all @g.batstate-u.edu.ph)
   if (smtpUser && smtpPass) {
